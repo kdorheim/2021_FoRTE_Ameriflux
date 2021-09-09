@@ -1,0 +1,337 @@
+---
+title: "FoRTE Disturbance Paper Analysis"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '4'
+    toc_float: yes
+    number_sections: true
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+# Objective 
+
+## Set up script
+
+```{r setup, include=FALSE, message=FALSE, echo = FALSE, cache = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, fig.width = 8, fig.height = 5)
+# R 3.6.3
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(stickylabeller)
+library(ggpmisc)
+library(ggpubr)
+
+BASE_DIR <- here::here()
+INPUT_DIR <- file.path(BASE_DIR, "ED-outputs", "results")
+
+# Define the color themes and the graphing aesthetics. 
+THEME <- theme_bw()
+FORTE_SEVERITY_COLORS <- c("#009E73", "#0072B2", "#D55E00")
+names(FORTE_SEVERITY_COLORS) <- c('45 %', '65 %', '85 %')
+```
+
+Load the data 
+
+```{r}
+# Load the ED output data
+ED_output <- read.csv(list.files(INPUT_DIR, "exp-constant-yr.csv", full.names = TRUE), stringsAsFactors = FALSE)
+
+# Load the meteorological input, the annual average and the monthly average. 
+annual_met <- read.csv(list.files(INPUT_DIR, "constant_annual_met_data.csv", full.names = TRUE), stringsAsFactors = FALSE)
+monthly_met <- read.csv(list.files(INPUT_DIR, "constant_annual_met_data-monthly.csv", full.names = TRUE), stringsAsFactors = FALSE)
+
+# Load the results realted to the metrics of ecosystem stability, the log ratio of the time series, resilience, 
+# and resistance. 
+disturbance <- read.csv(file.path(INPUT_DIR, "metric", "ln_ratio_timeseries.csv"), stringsAsFactors = FALSE) %>% 
+  mutate(met = as.character(met))
+resilience <- read.csv(file.path(INPUT_DIR, "metric", "resilience_values.csv"), stringsAsFactors = FALSE) %>% 
+  mutate(met = as.character(met))
+resistance <- read.csv(file.path(INPUT_DIR, "metric", "resistance_values.csv"), stringsAsFactors = FALSE) %>% 
+  mutate(met = as.character(met))
+```
+
+
+```{r}
+annual_met %>% 
+  filter(variable %in% c("ugrd", "vgrd")) %>% 
+  mutate(value = value^2) %>% 
+  group_by(year, met) %>% 
+  summarise(value = sqrt(sum(value))) %>% 
+  ungroup() %>%
+  mutate(units = "m s-1", 
+         description = "total winnd", 
+         variable = "grd") -> 
+  wind_df
+  
+annual_met %>% 
+  filter(!variable %in% c("ugrd", "vgrd")) %>% 
+  bind_rows(wind_df) %>% 
+  filter(variable != "hgt") ->
+  annual_met
+
+
+monthly_met %>% 
+  filter(variable %in% c("ugrd", "vgrd")) %>% 
+  mutate(value = value^2) %>% 
+  group_by(month, mon_time, met) %>% 
+  summarise(value = sqrt(sum(value))) %>% 
+  ungroup() %>%
+  mutate(units = "m s-1", 
+         description = "total winnd", 
+         variable = "grd") -> 
+  wind_df
+  
+monthly_met %>% 
+  filter(!variable %in% c("ugrd", "vgrd")) %>% 
+  bind_rows(wind_df) %>% 
+  filter(variable != "hgt") ->
+  monthly_met
+```
+
+
+# Disturbance Time Series 
+
+Log ratio plots show in the Hillbrand manuscript. 
+
+```{r}
+disturbance %>%  
+  mutate(Severity = severity) %>% 
+  ggplot() + 
+  geom_line(aes(year, value, color = Severity, line = met), alpha = 0.5, size = .75) + 
+  facet_wrap("variable", scales = 'free') +
+  theme_bw(base_size = 14)+
+  scale_color_manual(values = FORTE_SEVERITY_COLORS) + 
+  guides(colour = guide_legend("Severity")) + 
+  labs(y = "Log Ratio", x = "Years Since Disturbance") -> 
+  plot
+
+plot
+
+ggsave(plot, filename = "figures/disturbance.png", width = 8, height = 5)
+
+```
+
+
+# Resistance vs Resilience 
+
+
+
+```{r, fig.width=5, fig.height=5}
+my.formula <- y ~ x
+
+resilience %>% 
+  left_join(resistance) %>%  
+  ggplot(aes(trough_resistance, resilience, color = severity)) + 
+  geom_point(alpha = 0.75, size = 1.5) + 
+  geom_smooth(method = "lm", size = 0.5, alpha = 0.2) + 
+  labs(x = "Resistance", 
+       y = "Resilience") + 
+  theme_bw(base_size = 14) +
+  scale_color_manual(values = FORTE_SEVERITY_COLORS) + 
+    facet_wrap("variable", 
+               scales = "free") + 
+  guides(colour = guide_legend("Severity")) -> 
+  plot
+  ggsave(plot, filename = "figures/resistance_resilience.png", width = 8, height = 5.5)
+
+```
+
+# Meterology Analysis 
+```{r}
+set.seed(1234)
+library(readr)
+library(dplyr)
+library(stringr)
+library(readr)
+
+resistance <- read_csv(here::here("ED-outputs", "results", "metric", "resistance_values.csv"))
+resilience <- read_csv("./ED-outputs/results/metric/resilience_values.csv")
+met <- read_csv("./ED-outputs/results/constant_annual_met_data.csv")
+
+# The variable table, contains inforamtion about the met variable abreviation with a descrioption. 
+var_info <- data.table::data.table(met_var = c('dlwrf', 'nbdsf', 'nddsf', 'vbdsf',
+                                    'vddsf', 'prate', 'pres', 'hgt', 
+                                    'ugrd', 'vgrd', 'sh', 'tmp', 'GPP', 'grd'), 
+                       description = c('downward long wave radiation', 
+                                       'near infrared beam downward solar radiation', 
+                                       'near IR diffuse downward solar radiation', 
+                                       'visible beam downward solar radiation',
+                                       'visible diffuse downward solar radiation', 
+                                       'precipitation rate', 
+                                       'atmospheric pressure', 
+                                       'geopotential height', 
+                                       'zonal wind',
+                                       'meridional wind', 
+                                       'specific humidity',
+                                       'air temperature', 
+                                       'pre-dist. productivity', 'total wind'),  
+                       units = c('W m-2', 'W m-2', 'W m-2', 'W m-2',
+                                 'W m-2', 'kgH2O m-2 s-1', 'Pa', 'm',
+                                 'm s-1', 'm s-1', 'kgH2O kgAir-1', 'K', 'MgC ha-1 year-1', 'm s-1'), stringsAsFactors=FALSE)
+
+
+
+# Add 2000 GPP to the met df since it is a "condition". 
+ED_output <- read.csv("ED-outputs/results/exp-constant-yr.csv", stringsAsFactors = FALSE) %>% 
+  filter(scn == "harvest_0" & variable == "GPP" & year == 2000) %>% 
+  select(met, value, variable, value, units = unit)
+
+met %>% 
+  filter(variable %in% c("ugrd", "vgrd")) %>% 
+  mutate(value = value^2) %>% 
+  group_by(year, met) %>% 
+  summarise(value = sqrt(sum(value))) %>% 
+  ungroup() %>%
+  mutate(units = "m s-1", 
+         description = "total winnd", 
+         variable = "grd") -> 
+  wind_df
+  
+met %>% 
+  filter(!variable %in% c("ugrd", "vgrd")) %>% 
+  bind_rows(wind_df, 
+            ED_output) ->
+  met
+
+resistance %>% 
+  select(scn, variable, met, value = trough_resistance, severity) %>% 
+  mutate(metric = "resistance") ->
+  combined
+resilience %>% 
+  select(scn, variable, met, value = resilience, severity) %>% 
+  mutate(metric = "resilience") %>% 
+  bind_rows(combined) ->
+  combined
+
+```
+
+
+```{r, echo=FALSE}
+des_order <- c("Air Temperature\n(K)", "Visible Beam Downward Solar Radiation\n(W m-2)",
+               "Atmospheric Pressure\n(Pa)", "Visible Diffuse Downward Solar Radiation\n(W m-2)", 
+               "Downward Long Wave Radiation\n(W m-2)", "Specific Humidity\n(kgH2O kgAir-1)", 
+                "Precipitation Rate\n(kgH2O m-2 s-1)", "Total Wind\n(m s-1)", 
+               "Pre-Dist. Productivity\n(MgC ha-1 year-1)")       
+
+
+met %>% 
+  # hgt is constant; remove
+  filter(variable != "hgt") %>%   
+  group_by(met, variable) %>% 
+  summarise(value = mean(value), .groups = "drop") ->
+  met2
+
+
+met2 %>% 
+  mutate(met_var = variable) %>% 
+  inner_join(var_info, by = "met_var") %>%  
+  mutate(description = paste0(str_to_title(description), '\n(', units, ')')) %>% 
+  filter(description %in% des_order) -> 
+  to_plot_met2
+
+met2 %>% 
+  filter(met == 2019) -> 
+  met2019
+
+met2019 %>% 
+  mutate(met_var = variable) %>% 
+  left_join(var_info, by = "met_var") %>%  
+  mutate(description = paste0(str_to_title(description), '\n(', units, ')')) -> 
+  to_plot_2019
+
+
+to_plot_met2$description <- factor(to_plot_met2$description, des_order, 
+                              ordered = TRUE) 
+to_plot_2019$description <- factor(to_plot_2019$description, des_order, 
+                              ordered = TRUE) 
+
+library(ggplot2)
+library(tidyr)
+met2_wide <- pivot_wider(met2, id_cols = "met", names_from = "variable")
+pca_met <- prcomp(met2_wide[-1], scale. = TRUE)  # -1 removes met year column 
+
+
+resistance %>% 
+  select(variable, met, trough_resistance) %>% 
+  left_join(select(met2_wide, -nbdsf, -nddsf), by = "met") ->
+  resist_combined
+
+# Build a combined met-metric dataset
+combined %>% 
+  select(metric, variable, met, value) %>% 
+  # We see from the met analysis above that vbdsf and vddsf are highly
+  # correlated with nbdsf and nddsf respectively; remove one pair
+  left_join(select(met2_wide, -nbdsf, -nddsf), by = "met") ->
+  metric_combined
+
+metric_combined %>% 
+  pivot_longer(dlwrf:vddsf, values_to = "met_value") ->
+  metric_comb_long
+
+# Fit a Random Forest for each variable (across all treatment severities)
+# Note the r.f. functions don't play well with tibbles, so change to data frame
+library(randomForest)
+d <- as.data.frame(metric_combined)
+rc_all <- split(d, interaction(d$metric, d$variable))
+rf_all <- lapply(rc_all, function(x) 
+  # remove metric, variable, met columns and run RF
+  randomForest(value ~ ., data = x[-1:-3], importance = TRUE)
+)
+
+# Importance metrics and partial plot data
+import <- list()
+partial <- list()
+for(var in names(rf_all)) {
+  mod <- rf_all[[var]]
+  metric <- rc_all[[var]]$metric[1]
+  variable <- rc_all[[var]]$variable[1]
+  
+  imp <- as.data.frame(importance(mod))
+  imp$met_var <- rownames(imp)
+  imp$metric <- metric
+  imp$variable <- variable
+  import[[var]] <- as_tibble(imp)
+  
+  impvar <- rownames(imp)[order(imp[, 1], decreasing = TRUE)]
+  for (i in seq_along(impvar[1:3])) {
+    pp <- partialPlot(mod, rc_all[[var]], impvar[i], plot = FALSE)
+    partial[[paste(var, i)]] <- tibble(metric = metric,
+                                       variable = variable,
+                                       met_var = impvar[i],
+                                       x = pp$x, y = pp$y)
+  }
+}
+
+import <- bind_rows(import)
+partial <- bind_rows(partial)
+
+library(forcats)
+f_imp_plot <- function(x) {
+  ggplot(x, aes(fct_reorder(met_var, `%IncMSE`), `%IncMSE`)) + 
+    geom_col() +
+    scale_x_discrete(labels = function(x) str_wrap(x, width = 25)) +
+    coord_flip() +
+    xlab(NULL) +
+    ggtitle(unique(x$variable)) 
+}
+
+import %>%
+  left_join(var_info) %>% 
+  mutate(met_var = str_to_title(description)) -> 
+  import2
+
+
+d <- filter(import2, metric == "resistance")
+xx <- lapply(split(d, d$variable), f_imp_plot)
+
+library(cowplot)
+varimp_plot <- plot_grid(xx[["GPP"]], xx[["Rh"]])
+print(varimp_plot)
+
+ggsave(varimp_plot, filename = "./figures/varimp_plot_resistance.png", width = 6, height = 3)
+
+```
+
